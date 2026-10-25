@@ -1,0 +1,265 @@
+const todoForm = document.querySelector("#todo-form");
+const todoInput = document.querySelector("#todo-input");
+const addButton = document.querySelector("#add-button");
+
+const todoList = document.querySelector("#todo-list");
+const emptyState = document.querySelector("#empty-state");
+
+const taskCount = document.querySelector("#task-count");
+const statusSummary = document.querySelector("#status-summary");
+
+const progressTrack = document.querySelector("#progress-track");
+const progressFill = document.querySelector("#progress-fill");
+
+const feedbackMessage = document.querySelector("#feedback-message");
+
+
+const API_URL = "/api/todos";
+
+
+let isSubmitting = false;
+
+
+
+
+function showMessage(message) {
+    feedbackMessage.textContent = message;
+    feedbackMessage.hidden = false;
+}
+
+function hideMessage() {
+    feedbackMessage.textContent = "";
+    feedbackMessage.hidden = true;
+}
+
+
+
+
+
+async function apiRequest(url, options = {}) {
+    const response = await fetch(url, options);
+
+    // DELETE may return 204, which has no response body.
+    if (response.status === 204) {
+        if (!response.ok) {
+            throw new Error("The request failed.");
+        }
+
+        return null;
+    }
+
+    // Read the server's response.
+    const data = await response.json();
+
+    // HTTP errors do not automatically cause fetch() to throw.
+    if (!response.ok) {
+        throw new Error(data.message || "Something went wrong.");
+    }
+
+    return data;
+}
+
+
+async function loadTodos() {
+    todoList.setAttribute("aria-busy", "true");
+
+    try {
+        hideMessage();
+
+        const todos = await apiRequest(API_URL);
+
+        renderTodos(todos);
+    } catch (error) {
+        showMessage(error.message || "Could not load tasks.");
+    } finally {
+        todoList.setAttribute("aria-busy", "false");
+    }
+}
+
+
+
+function renderTodos(todos) {
+  
+    todoList.replaceChildren();
+
+   
+    const completedCount = todos.filter(
+        todo => todo.completed
+    ).length;
+
+    const totalCount = todos.length;
+    const pendingCount = totalCount - completedCount;
+
+    
+    taskCount.textContent =
+        `${totalCount} ${totalCount === 1 ? "task" : "tasks"}`;
+
+  
+    statusSummary.textContent =
+        `${completedCount} of ${totalCount} tasks completed · ${pendingCount} remaining`;
+
+    
+    const percentage = totalCount === 0
+        ? 0
+        : Math.round((completedCount / totalCount) * 100);
+
+    progressFill.style.width = `${percentage}%`;
+
+    progressTrack.setAttribute("aria-valuenow", percentage);
+
+  
+    emptyState.hidden = totalCount > 0;
+
+
+    todos.forEach(todo => {
+        const listItem = document.createElement("li");
+        listItem.className = "todo-item";
+
+        if (todo.completed) {
+            listItem.classList.add("completed");
+        }
+
+ 
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.className = "todo-checkbox";
+        checkbox.checked = todo.completed;
+        checkbox.setAttribute(
+            "aria-label",
+            `Mark ${todo.text} as ${todo.completed ? "incomplete" : "complete"}`
+        );
+
+        
+        const text = document.createElement("span");
+        text.className = "todo-text";
+
+        
+        text.textContent = todo.text;
+
+       
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "delete-button";
+        deleteButton.textContent = "Delete";
+        deleteButton.setAttribute(
+            "aria-label",
+            `Delete ${todo.text}`
+        );
+
+        checkbox.addEventListener("change", async () => {
+            checkbox.disabled = true;
+
+            try {
+                hideMessage();
+
+                const updatedTodo = await apiRequest(
+                    `${API_URL}/${encodeURIComponent(todo.id)}`,
+                    {
+                        method: "PATCH",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            completed: checkbox.checked
+                        })
+                    }
+                );
+
+
+                await loadTodos();
+            } catch (error) {
+                checkbox.checked = todo.completed;
+                showMessage(error.message || "Could not update task.");
+            } finally {
+                checkbox.disabled = false;
+            }
+        });
+
+       
+        deleteButton.addEventListener("click", async () => {
+            deleteButton.disabled = true;
+
+            try {
+                hideMessage();
+
+                await apiRequest(
+                    `${API_URL}/${encodeURIComponent(todo.id)}`,
+                    {
+                        method: "DELETE"
+                    }
+                );
+
+                await loadTodos();
+            } catch (error) {
+                showMessage(error.message || "Could not delete task.");
+            } finally {
+                deleteButton.disabled = false;
+            }
+        });
+
+        listItem.append(checkbox, text, deleteButton);
+
+        // Add the row to the task list.
+        todoList.appendChild(listItem);
+    });
+}
+
+
+
+
+todoForm.addEventListener("submit", async event => {
+    // Prevent the browser from refreshing the page.
+    event.preventDefault();
+
+    if (isSubmitting) {
+        return;
+    }
+
+   
+    const text = todoInput.value.trim();
+
+
+    if (!text) {
+        showMessage("Please enter a task before adding it.");
+        todoInput.focus();
+        return;
+    }
+
+    isSubmitting = true;
+    addButton.disabled = true;
+    todoInput.disabled = true;
+    addButton.textContent = "Adding...";
+
+    try {
+        hideMessage();
+
+
+        await apiRequest(API_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ text: text })
+        });
+
+        todoInput.value = "";
+
+      
+        await loadTodos();
+
+        todoInput.focus();
+    } catch (error) {
+        showMessage(error.message || "Could not add task.");
+    } finally {
+        isSubmitting = false;
+        addButton.disabled = false;
+        todoInput.disabled = false;
+        addButton.innerHTML = "<span aria-hidden='true'>+</span> Add task";
+    }
+});
+
+
+
+
+
+loadTodos();
